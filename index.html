@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="OMS Schedule" />
+    <meta name="theme-color" content="#1e293b" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>" />
+    <title>OMS Weekly Schedule – PWA</title>
+    <!-- Font Awesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+    <!-- ─── DYNAMIC MANIFEST ────────────────────────────────────────── -->
+    <script>
+        (function() {
+            if (document.querySelector('link[rel="manifest"]')) return;
+            const manifest = {
+                name: 'OMS Weekly Schedule',
+                short_name: 'OMS Schedule',
+                description: 'Staff scheduling tool with global staff, undo/redo, swap, and weekly notes.',
+                start_url: window.location.href.split('?')[0],
+                display: 'standalone',
+                background_color: '#f4f6fa',
+                theme_color: '#1e293b',
+                icons: [{
+                    src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>",
+                    sizes: '192x192',
+                    type: 'image/svg+xml',
+                    purpose: 'any'
+                }, {
+                    src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>",
+                    sizes: '512x512',
+                    type: 'image/svg+xml',
+                    purpose: 'maskable'
+                }]
+            };
+            const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('link');
+            link.rel = 'manifest';
+            link.href = url;
+            document.head.appendChild(link);
+        })();
+
+        // ─── SERVICE WORKER ──────────────────────────────────────────
+        if ('serviceWorker' in navigator) {
+            const swCode = `
+                const CACHE_NAME = 'oms-schedule-v1';
+                const urlsToCache = [
+                    self.location.href,
+                    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css',
+                    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/webfonts/fa-solid-900.woff2',
+                    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/webfonts/fa-regular-400.woff2'
+                ];
+
+                self.addEventListener('install', event => {
+                    event.waitUntil(
+                        caches.open(CACHE_NAME)
+                            .then(cache => cache.addAll(urlsToCache))
+                            .then(() => self.skipWaiting())
+                    );
+                });
+
+                self.addEventListener('activate', event => {
+                    event.waitUntil(
+                        caches.keys().then(keys =>
+                            Promise.all(keys.map(key => {
+                                if (key !== CACHE_NAME) return caches.delete(key);
+                            }))
+                        ).then(() => self.clients.claim())
+                    );
+                });
+
+                self.addEventListener('fetch', event => {
+                    event.respondWith(
+                        caches.match(event.request)
+                            .then(response => response || fetch(event.request))
+                    );
+                });
+            `;
+
+            const swBlob = new Blob([swCode], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(swBlob);
+            navigator.serviceWorker.register(swUrl, { scope: '/' })
+                .then(() => console.log('Service Worker registered'))
+                .catch(err => console.warn('SW registration failed:', err));
+        }
+    </script>
+
+    <style>
+        /* ── Base ── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+            background: #f4f6fa;
+            padding: 16px 12px 40px;
+            color: #1e293b;
+            touch-action: manipulation;
+        }
+        .app {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+            background: white;
+            padding: 14px 18px;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+        .header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            color: #0f172a;
+        }
+        .header h1 small {
+            font-weight: 400;
+            font-size: 14px;
+            color: #64748b;
+            margin-left: 8px;
+        }
+        .header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+        .header-actions label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #475569;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .header-actions input[type="date"] {
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-size: 13px;
+            background: white;
+            max-width: 140px;
+            height: 38px;
+        }
+        .header-actions input[type="date"]:focus {
+            outline: none;
+            border-color: #1e293b;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.08);
+        }
+        .header-actions button {
+            background: #f1f5f9;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 30px;
+            font-size: 15px;
+            font-weight: 500;
+            color: #1e293b;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 38px;
+            min-width: 38px;
+            white-space: nowrap;
+            touch-action: manipulation;
+        }
+        .header-actions button:hover {
+            background: #e2e8f0;
+        }
+        .header-actions .btn-primary {
+            background: #1e293b;
+            color: white;
+        }
+        .header-actions .btn-primary:hover {
+            background: #0f172a;
+        }
+        .header-actions .btn-success {
+            background: #0b7e4b;
+            color: white;
+        }
+        .header-actions .btn-success:hover {
+            background: #0a6b3f;
+        }
+        .header-actions .btn-danger {
+            background: #b91c1c;
+            color: white;
+        }
+        .header-actions .btn-danger:hover {
+            background: #991b1b;
+        }
+        .header-actions .btn-outline {
+            background: transparent;
+            border: 1.5px solid #cbd5e1;
+        }
+        .header-actions .btn-outline:hover {
+            background: #f1f5f9;
+        }
+        .header-actions .btn-random {
+            background: #7c3aed;
+            color: white;
+        }
+        .header-actions .btn-random:hover {
+            background: #6d28d9;
+        }
+        .header-actions .btn-swap {
+            background: #f59e0b;
+            color: white;
+        }
+        .header-actions .btn-swap.active {
+            background: #d97706;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.4);
+        }
+        .header-actions .btn-swap:hover {
+            background: #d97706;
+        }
+        .header-actions .btn-undo {
+            background: #6366f1;
+            color: white;
+        }
+        .header-actions .btn-undo:hover {
+            background: #4f46e5;
+        }
+        .header-actions .btn-redo {
+            background: #8b5cf6;
+            color: white;
+        }
+        .header-actions .btn-redo:hover {
+            background: #7c3aed;
+        }
+        .header-actions .btn-undo:disabled,
+        .header-actions .btn-redo:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .header-actions .btn-text {
+            padding: 6px 14px;
+            font-size: 13px;
+            gap: 6px;
+        }
+        .header-actions .btn-text i {
+            font-size: 14px;
+        }
+
+        /* ── Weekly notes ── */
+        .notes-area {
+            margin-bottom: 16px;
+        }
+        .notes-area textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 54px;
+            background: white;
+            transition: 0.15s;
+            touch-action: manipulation;
+        }
+        .notes-area textarea:focus {
+            outline: none;
+            border-color: #1e293b;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.08);
+        }
+        .notes-area textarea::placeholder {
+            color: #94a3b8;
+        }
+
+        /* ── Table ── */
+        .table-wrap {
+            overflow-x: auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+            padding: 4px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            min-width: 800px;
+        }
+        thead th {
+            background: #f8fafc;
+            padding: 12px 8px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: #475569;
+            border-bottom: 2px solid #e2e8f0;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            white-space: nowrap;
+        }
+        thead th:first-child {
+            text-align: left;
+            padding-left: 12px;
+            min-width: 100px;
+        }
+        thead th:nth-child(2) {
+            min-width: 44px;
+        }
+        thead th:last-child {
+            min-width: 50px;
+            text-align: left;
+            padding-left: 6px;
+        }
+        tbody tr {
+            transition: background 0.15s;
+            border-bottom: 1px solid #eef2f6;
+        }
+        tbody tr:hover {
+            background: #fafbfc;
+        }
+        tbody td {
+            padding: 6px 4px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 13px;
+        }
+        tbody td:first-child {
+            text-align: left;
+            padding-left: 12px;
+            font-weight: 500;
+            color: #0f172a;
+        }
+        tbody td:nth-child(2) {
+            font-weight: 600;
+            color: #334155;
+            font-size: 12px;
+            letter-spacing: 0.3px;
+        }
+        tbody td:last-child {
+            text-align: left;
+            padding-left: 6px;
+            padding-right: 8px;
+        }
+
+        /* ── Shift selects ── */
+        .cell-select {
+            width: 56px;
+            padding: 6px 2px 6px 6px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            background: transparent;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.15s;
+            text-align: center;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 4px center;
+            padding-right: 18px;
+            min-height: 38px;
+            touch-action: manipulation;
+        }
+        .cell-select:hover {
+            border-color: #cbd5e1;
+            background-color: #f1f5f9;
+        }
+        .cell-select:focus {
+            outline: none;
+            border-color: #1e293b;
+            background-color: #ffffff;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.12);
+        }
+        .cell-select option {
+            font-weight: 400;
+            padding: 4px;
+        }
+
+        /* Colour coding */
+        .cell-select.shift-M {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #b7d4b7;
+        }
+        .cell-select.shift-N {
+            background-color: #d6eaf8;
+            color: #1a4b8c;
+            border-color: #b0d0e8;
+        }
+        .cell-select.shift-OFF {
+            background-color: #fff3cd;
+            color: #856404;
+            border-color: #f0d99e;
+        }
+        .cell-select.shift-Annual {
+            background-color: #e6d5f5;
+            color: #6c2e9e;
+            border-color: #c9b0e0;
+        }
+        .cell-select.shift-Local {
+            background-color: #fce4d6;
+            color: #a05a1c;
+            border-color: #f0cba8;
+        }
+
+        /* Swap mode: highlight selected cell */
+        .cell-select.swap-selected {
+            border-color: #7c3aed !important;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.4);
+            background-color: #ede9fe !important;
+        }
+        .cell-select.swap-mode {
+            cursor: pointer;
+        }
+        .cell-select.swap-mode:not(.swap-selected):hover {
+            border-color: #a78bfa;
+            background-color: #f5f3ff;
+        }
+
+        /* ── Remarks input ── */
+        .remark-input {
+            border: 1.5px solid transparent;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 13px;
+            width: 100%;
+            min-width: 50px;
+            background: transparent;
+            color: #1e293b;
+            transition: 0.15s;
+            min-height: 34px;
+            touch-action: manipulation;
+        }
+        .remark-input:hover {
+            border-color: #e2e8f0;
+            background: #fafbfc;
+        }
+        .remark-input:focus {
+            outline: none;
+            border-color: #1e293b;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.08);
+        }
+
+        /* ── Name & Zone inputs ── */
+        .name-input {
+            border: 1.5px solid transparent;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 13px;
+            font-weight: 500;
+            width: 100%;
+            min-width: 80px;
+            background: transparent;
+            color: #0f172a;
+            transition: 0.15s;
+            min-height: 34px;
+            touch-action: manipulation;
+        }
+        .name-input:hover {
+            border-color: #e2e8f0;
+            background: #fafbfc;
+        }
+        .name-input:focus {
+            outline: none;
+            border-color: #1e293b;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.08);
+        }
+        .zone-input {
+            border: 1.5px solid transparent;
+            border-radius: 6px;
+            padding: 4px 6px;
+            font-size: 12px;
+            font-weight: 600;
+            width: 44px;
+            text-align: center;
+            background: transparent;
+            color: #334155;
+            transition: 0.15s;
+            text-transform: uppercase;
+            min-height: 34px;
+            touch-action: manipulation;
+        }
+        .zone-input:hover {
+            border-color: #e2e8f0;
+            background: #fafbfc;
+        }
+        .zone-input:focus {
+            outline: none;
+            border-color: #1e293b;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.08);
+        }
+
+        /* ── Delete button ── */
+        .delete-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: 0.15s;
+            line-height: 1;
+            min-height: 38px;
+            min-width: 38px;
+            touch-action: manipulation;
+        }
+        .delete-btn:hover {
+            color: #b91c1c;
+            background: #fee2e2;
+        }
+
+        /* ── Summary row ── */
+        .summary-row td {
+            background: #f1f5f9;
+            font-weight: 600;
+            font-size: 13px;
+            padding: 10px 6px;
+            border-top: 2px solid #cbd5e1;
+            color: #0f172a;
+        }
+        .summary-row td:first-child {
+            padding-left: 12px;
+            font-weight: 700;
+            color: #1e293b;
+        }
+        .summary-row td:last-child {
+            padding-left: 8px;
+        }
+        .summary-row .stat-label {
+            font-weight: 400;
+            color: #475569;
+        }
+        .summary-row .stat-value {
+            font-weight: 700;
+            font-size: 15px;
+            min-width: 24px;
+            display: inline-block;
+        }
+        .summary-row .stat-value.morning {
+            color: #155724;
+        }
+        .summary-row .stat-value.night {
+            color: #1a4b8c;
+        }
+        .summary-row .stat-value.off {
+            color: #856404;
+        }
+        .summary-row .stat-value.onduty {
+            color: #0f172a;
+        }
+
+        /* ── Add row area ── */
+        .add-row-area {
+            padding: 12px 14px;
+            background: #fafbfc;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+        .add-row-area input {
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 14px;
+            background: white;
+            transition: 0.15s;
+            min-height: 44px;
+            touch-action: manipulation;
+        }
+        .add-row-area input:focus {
+            outline: none;
+            border-color: #1e293b;
+            box-shadow: 0 0 0 3px rgba(30, 41, 59, 0.08);
+        }
+        .add-row-area input::placeholder {
+            color: #94a3b8;
+        }
+        .add-row-area .add-btn {
+            background: #1e293b;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            padding: 8px 22px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: 0.2s;
+            min-height: 44px;
+            touch-action: manipulation;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .add-row-area .add-btn:hover {
+            background: #0f172a;
+        }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0f172a;
+            color: white;
+            padding: 12px 28px;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: none;
+            z-index: 999;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* ── Mobile adjustments ── */
+        @media (max-width: 700px) {
+            .header {
+                flex-direction: column;
+                align-items: stretch;
+                padding: 12px 14px;
+            }
+            .header h1 {
+                font-size: 18px;
+            }
+            .header-actions {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .header-actions label {
+                flex: 1 1 100%;
+                justify-content: center;
+            }
+            .header-actions input[type="date"] {
+                max-width: 100%;
+                width: 100%;
+            }
+            .header-actions button {
+                flex: 1 0 auto;
+                justify-content: center;
+                font-size: 15px;
+                padding: 6px 12px;
+                min-height: 44px;
+            }
+            .header-actions .btn-text {
+                font-size: 13px;
+                padding: 6px 14px;
+            }
+            .add-row-area {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .add-row-area input {
+                width: 100%;
+            }
+            .add-row-area .add-btn {
+                width: 100%;
+                text-align: center;
+                justify-content: center;
+            }
+            table {
+                font-size: 12px;
+                min-width: 700px;
+            }
+            .cell-select {
+                width: 48px;
+                font-size: 12px;
+                padding-right: 16px;
+                min-height: 36px;
+            }
+            thead th {
+                padding: 8px 4px;
+                font-size: 10px;
+            }
+            tbody td {
+                padding: 4px 2px;
+            }
+            .summary-row td {
+                font-size: 11px;
+                padding: 8px 4px;
+            }
+            .notes-area textarea {
+                font-size: 14px;
+                min-height: 44px;
+                padding: 8px 12px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header-actions button {
+                font-size: 13px;
+                padding: 4px 8px;
+                min-height: 38px;
+                min-width: 34px;
+            }
+            .cell-select {
+                width: 40px;
+                font-size: 11px;
+                padding-right: 14px;
+                min-height: 32px;
+            }
+            table {
+                min-width: 600px;
+            }
+        }
+
+        @media print {
+            body {
+                background: white;
+                padding: 10px;
+            }
+            .header-actions,
+            .add-row-area,
+            .delete-btn,
+            .no-print,
+            .notes-area {
+                display: none !important;
+            }
+            .table-wrap {
+                box-shadow: none;
+                border: 1px solid #ddd;
+            }
+            .cell-select {
+                border: none !important;
+                background: none !important;
+                padding: 4px 8px !important;
+                width: auto !important;
+                appearance: none !important;
+                -webkit-appearance: none !important;
+            }
+            .cell-select option {
+                display: none;
+            }
+            .cell-select {
+                background-image: none !important;
+            }
+            .remark-input,
+            .name-input,
+            .zone-input {
+                border: none !important;
+                background: none !important;
+            }
+            .summary-row td {
+                background: #f1f5f9 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app" id="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>📋 OMS Weekly Schedule <small id="weekLabel">Select a week</small></h1>
+            <div class="header-actions">
+                <label>📅 <input type="date" id="weekPicker" /></label>
+                <button class="btn-random" onclick="randomizeCurrentWeek()" title="Randomize shifts"><i class="fa-solid fa-shuffle"></i></button>
+                <button class="btn-swap" id="swapBtn" onclick="toggleSwapMode()" title="Swap mode"><i class="fa-solid fa-arrow-right-arrow-left"></i></button>
+                <button class="btn-undo" id="undoBtn" onclick="undo()" disabled title="Undo (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+                <button class="btn-redo" id="redoBtn" onclick="redo()" disabled title="Redo (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="btn-outline" onclick="copyCurrentWeek()" title="Copy week"><i class="fa-regular fa-copy"></i></button>
+                <button onclick="exportCSV()" title="Export CSV"><i class="fa-solid fa-file-csv"></i></button>
+                <button onclick="window.print()" title="Print"><i class="fa-solid fa-print"></i></button>
+                <button class="btn-success" onclick="saveToLocal()" title="Save"><i class="fa-regular fa-floppy-disk"></i></button>
+                <button class="btn-danger" onclick="resetAll()" title="Reset"><i class="fa-solid fa-arrow-rotate-left"></i></button>
+            </div>
+        </header>
+
+        <!-- Weekly notes (with default disclaimer from image) -->
+        <div class="notes-area no-print">
+            <textarea id="weeklyNotes" placeholder="Weekly notes (e.g., public holidays, training, reminders)…"></textarea>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrap">
+            <table id="scheduleTable">
+                <thead>
+                    <tr>
+                        <th>Name</th><th>Zone</th>
+                        <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
+                        <th></th>
+                        <th class="no-print" style="width:32px; min-width:32px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+                <tfoot id="tableFoot"></tfoot>
+            </table>
+
+            <div class="add-row-area no-print">
+                <input type="text" id="newName" placeholder="Full name..." style="flex:2; min-width:120px;" />
+                <input type="text" id="newZone" placeholder="Zone" style="flex:0.5; min-width:50px; max-width:70px; text-transform:uppercase;" />
+                <button class="add-btn" onclick="addStaff()"><i class="fa-solid fa-user-plus"></i> Add Staff</button>
+                <span style="font-size:12px; color:#94a3b8; margin-left:auto;">Shift: M · N · OFF · Annual · Local</span>
+            </div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script>
+        // ─── CONSTANTS ────────────────────────────────────────────────
+        const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const SHIFT_OPTIONS = [
+            { value: 'M', label: 'M' },
+            { value: 'N', label: 'N' },
+            { value: 'OFF', label: 'OFF' },
+            { value: 'Annual', label: 'Annual' },
+            { value: 'Local', label: 'Local' },
+        ];
+        const SHIFT_CLASSES = {
+            'M': 'shift-M',
+            'N': 'shift-N',
+            'OFF': 'shift-OFF',
+            'Annual': 'shift-Annual',
+            'Local': 'shift-Local',
+        };
+
+        // ─── DEFAULT GLOBAL STAFF ────────────────────────────────────
+        const DEFAULT_GLOBAL = [ 
+            { name: 'Javelyn Degal', zone: 'ABC' },
+        ];
+
+        // ─── RANDOM SCHEDULE ─────────────────────────────────────────
+        function generateRandomSchedule() {
+            const schedule = {};
+            const offIndex = Math.floor(Math.random() * DAYS.length);
+            DAYS.forEach((day, index) => {
+                schedule[day] = (index === offIndex) ? 'OFF' : (Math.random() < 0.5 ? 'M' : 'N');
+            });
+            return schedule;
+        }
+
+        // ─── GLOBAL STAFF ─────────────────────────────────────────────
+        function getGlobalStaff() {
+            const saved = localStorage.getItem('omsGlobalStaff');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed) && parsed.length) return parsed;
+                } catch (_) {}
+            }
+            const initial = DEFAULT_GLOBAL.map(s => ({ name: s.name, zone: s.zone }));
+            localStorage.setItem('omsGlobalStaff', JSON.stringify(initial));
+            return initial;
+        }
+
+        function saveGlobalStaff(list) {
+            localStorage.setItem('omsGlobalStaff', JSON.stringify(list));
+        }
+
+        // ─── STATE ────────────────────────────────────────────────────
+        let staffData = [];
+        let currentWeekKey = '';
+        let globalStaff = [];
+        let history = [];
+        let historyIndex = -1;
+        const MAX_HISTORY = 50;
+
+        // ─── UNDO / REDO ──────────────────────────────────────────────
+        function pushHistory() {
+            history = history.slice(0, historyIndex + 1);
+            const clone = JSON.parse(JSON.stringify(staffData));
+            history.push(clone);
+            if (history.length > MAX_HISTORY) history.shift();
+            historyIndex = history.length - 1;
+            updateUndoButtons();
+        }
+
+        function updateUndoButtons() {
+            document.getElementById('undoBtn').disabled = (historyIndex <= 0);
+            document.getElementById('redoBtn').disabled = (historyIndex >= history.length - 1);
+        }
+
+        function undo() {
+            if (historyIndex <= 0) return;
+            historyIndex--;
+            staffData = JSON.parse(JSON.stringify(history[historyIndex]));
+            render();
+            updateUndoButtons();
+            showToast('↩️ Undo');
+        }
+
+        function redo() {
+            if (historyIndex >= history.length - 1) return;
+            historyIndex++;
+            staffData = JSON.parse(JSON.stringify(history[historyIndex]));
+            render();
+            updateUndoButtons();
+            showToast('↪️ Redo');
+        }
+
+        // ─── WEEK HANDLING ────────────────────────────────────────────
+        function getSunday(dateStr) {
+            const d = new Date(dateStr);
+            const day = d.getDay();
+            d.setDate(d.getDate() - day);
+            d.setHours(0, 0, 0, 0);
+            return d;
+        }
+
+        function formatDate(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function getWeekKey(sunday) { return formatDate(sunday); }
+
+        function getWeekRange(sunday) {
+            const end = new Date(sunday);
+            end.setDate(end.getDate() + 6);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return `${sunday.getDate()} ${months[sunday.getMonth()]} – ${end.getDate()} ${months[end.getMonth()]} ${end.getFullYear()}`;
+        }
+
+        function loadWeek(dateStr) {
+            const sunday = getSunday(dateStr);
+            const key = getWeekKey(sunday);
+            currentWeekKey = key;
+            document.getElementById('weekLabel').textContent = getWeekRange(sunday);
+
+            // Default disclaimer from image
+            const defaultDisclaimer = "Please be aware that schedules will change Everyweek and also depends on store in charge if have any plans for that week and INFORM Incharge earlier also take approval from AM, lavatory break not allowed more than 25 minutes in a day";
+            const notes = localStorage.getItem('omsNotes_' + key) || defaultDisclaimer;
+            document.getElementById('weeklyNotes').value = notes;
+
+            const saved = localStorage.getItem('omsSchedule_' + key);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed) && parsed.length) {
+                        staffData = parsed;
+                        history = [JSON.parse(JSON.stringify(staffData))];
+                        historyIndex = 0;
+                        updateUndoButtons();
+                        render();
+                        return;
+                    }
+                } catch (_) {}
+            }
+
+            staffData = globalStaff.map(s => ({
+                name: s.name,
+                zone: s.zone,
+                schedule: generateRandomSchedule(),
+                remarks: ''
+            }));
+            history = [JSON.parse(JSON.stringify(staffData))];
+            historyIndex = 0;
+            updateUndoButtons();
+            render();
+            saveToLocal();
+            showToast('🔄 New week created');
+        }
+
+        function onWeekChange(e) { loadWeek(e.target.value); }
+
+        // ─── RENDER ──────────────────────────────────────────────────
+        function render() {
+            renderBody();
+            renderFooter();
+            if (window.swapModeActive) {
+                document.querySelectorAll('.cell-select').forEach(el => el.classList.add('swap-mode'));
+            }
+        }
+
+        function renderBody() {
+            const tbody = document.getElementById('tableBody');
+            if (!tbody) return;
+            let html = '';
+            staffData.forEach((staff, idx) => {
+                html += `<tr data-index="${idx}">`;
+                html += `<td><input class="name-input" type="text" value="${escHtml(staff.name)}" onchange="updateStaff(${idx}, 'name', this.value)" placeholder="Name" /></td>`;
+                html += `<td><input class="zone-input" type="text" value="${escHtml(staff.zone)}" onchange="updateStaff(${idx}, 'zone', this.value.toUpperCase())" maxlength="4" placeholder="Z" /></td>`;
+                DAYS.forEach(day => {
+                    const val = staff.schedule?.[day] || 'OFF';
+                    html += `<td><select class="cell-select ${SHIFT_CLASSES[val] || ''}" data-row="${idx}" data-day="${day}" onchange="updateShift(${idx}, '${day}', this.value)">`;
+                    SHIFT_OPTIONS.forEach(opt => {
+                        html += `<option value="${opt.value}" ${opt.value === val ? 'selected' : ''}>${opt.label}</option>`;
+                    });
+                    html += `</select></td>`;
+                });
+                html += `<td><input class="remark-input" type="text" value="${escHtml(staff.remarks || '')}" onchange="updateStaff(${idx}, 'remarks', this.value)" /></td>`;
+                html += `<td class="no-print" style="text-align:center;"><button class="delete-btn" onclick="deleteStaff(${idx})" title="Delete row">✕</button></td>`;
+                html += `</tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function renderFooter() {
+            const tfoot = document.getElementById('tableFoot');
+            if (!tfoot) return;
+            const counts = getCounts();
+            const totalStaff = staffData.length;
+            const onDuty = counts.M + counts.N;
+            const offOnly = counts.OFF;
+
+            const html = `
+                <tr class="summary-row">
+                    <td colspan="2" style="text-align:left; padding-left:12px;">
+                        <span style="font-weight:700;">Summary</span>
+                        <span style="font-weight:400; color:#64748b; margin-left:8px; font-size:12px;">${totalStaff} staff</span>
+                    </td>
+                    <td><span class="stat-label">M</span> <span class="stat-value morning">${counts.M}</span></td>
+                    <td><span class="stat-label">N</span> <span class="stat-value night">${counts.N}</span></td>
+                    <td><span class="stat-label">OFF</span> <span class="stat-value off">${offOnly}</span></td>
+                    <td><span class="stat-label">OFF</span> <span class="stat-value off">${offOnly}</span></td>
+                    <td><span class="stat-label">OFF</span> <span class="stat-value off">${offOnly}</span></td>
+                    <td><span class="stat-label">OFF</span> <span class="stat-value off">${offOnly}</span></td>
+                    <td><span class="stat-label">OFF</span> <span class="stat-value off">${offOnly}</span></td>
+                    <td style="text-align:left; padding-left:8px;">
+                        <span class="stat-label">On duty:</span>
+                        <span class="stat-value onduty">${onDuty}</span>
+                        <span style="color:#94a3b8; font-weight:400; margin-left:4px; font-size:12px;">(M+${counts.N})</span>
+                    </td>
+                    <td class="no-print"></td>
+                </tr>
+                <!-- ── EXACT SHIFT TIMINGS FROM THE IMAGE ── -->
+                <tr class="summary-row" style="border-top:1px solid #e2e8f0;">
+                    <td colspan="11" style="text-align:left; padding:8px 16px; font-weight:400; color:#475569; font-size:12px; line-height:1.7;">
+                        <div><strong>M</strong>: M-MORNING (9:00 AM TO 6:00 PM) - Normal Timing</div>
+                        <div><strong>N</strong>: N-NIGHT (1:00 PM to 10:00 PM) - Normal Timing</div>
+                        <div><strong>N</strong>: N-NIGHT (3:00 PM to 12:00 PM) - Weekend Timing</div>
+                        <div style="margin-top:4px; color:#94a3b8;">OFF · Annual · Local</div>
+                    </td>
+                </tr>
+            `;
+            tfoot.innerHTML = html;
+        }
+
+        // ─── HELPERS ──────────────────────────────────────────────────
+        function escHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function getCounts() {
+            const counts = { M: 0, N: 0, OFF: 0, Annual: 0, Local: 0 };
+            staffData.forEach(staff => {
+                if (!staff.schedule) return;
+                DAYS.forEach(day => {
+                    const val = staff.schedule[day] || 'OFF';
+                    if (counts.hasOwnProperty(val)) counts[val]++;
+                    else counts.OFF++;
+                });
+            });
+            return counts;
+        }
+
+        // ─── UPDATE ──────────────────────────────────────────────────
+        function updateStaff(idx, field, value) {
+            if (idx < 0 || idx >= staffData.length) return;
+            staffData[idx][field] = value;
+            autoSave();
+            renderFooter();
+            pushHistory();
+        }
+
+        function updateShift(idx, day, value) {
+            if (idx < 0 || idx >= staffData.length) return;
+            if (!staffData[idx].schedule) staffData[idx].schedule = {};
+            staffData[idx].schedule[day] = value;
+            autoSave();
+            const tr = document.querySelector(`tr[data-index="${idx}"]`);
+            if (tr) {
+                const cells = tr.querySelectorAll('.cell-select');
+                const dayIndex = DAYS.indexOf(day);
+                if (cells[dayIndex]) {
+                    const sel = cells[dayIndex];
+                    sel.className = 'cell-select';
+                    if (SHIFT_CLASSES[value]) sel.classList.add(SHIFT_CLASSES[value]);
+                    if (window.swapModeActive) sel.classList.add('swap-mode');
+                }
+            }
+            renderFooter();
+            pushHistory();
+        }
+
+        // ─── SWAP MODE ──────────────────────────────────────────────
+        let swapModeActive = false;
+        let selectedCell = null;
+
+        function toggleSwapMode() {
+            swapModeActive = !swapModeActive;
+            const btn = document.getElementById('swapBtn');
+            btn.classList.toggle('active', swapModeActive);
+            if (swapModeActive) {
+                btn.title = 'Swap mode ON (click to toggle off)';
+                document.querySelectorAll('.cell-select').forEach(el => el.classList.add('swap-mode'));
+                showToast('🔄 Swap mode ON – click a shift, then click another to swap');
+            } else {
+                btn.title = 'Swap mode (click to toggle)';
+                document.querySelectorAll('.cell-select').forEach(el => {
+                    el.classList.remove('swap-mode', 'swap-selected');
+                });
+                selectedCell = null;
+                showToast('🔄 Swap mode OFF');
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!swapModeActive) return;
+            const target = e.target.closest('.cell-select');
+            if (!target) return;
+            e.preventDefault();
+            const row = parseInt(target.dataset.row);
+            const day = target.dataset.day;
+            if (isNaN(row) || !day) return;
+
+            if (!selectedCell) {
+                document.querySelectorAll('.cell-select').forEach(el => el.classList.remove('swap-selected'));
+                target.classList.add('swap-selected');
+                selectedCell = { element: target, row, day };
+                showToast(`Selected ${staffData[row].name} ${day.toUpperCase()}`);
+                return;
+            }
+            if (selectedCell.element === target) {
+                target.classList.remove('swap-selected');
+                selectedCell = null;
+                showToast('Selection cleared');
+                return;
+            }
+            const row1 = selectedCell.row,
+                day1 = selectedCell.day;
+            const row2 = row,
+                day2 = day;
+            const val1 = staffData[row1].schedule[day1];
+            const val2 = staffData[row2].schedule[day2];
+            staffData[row1].schedule[day1] = val2;
+            staffData[row2].schedule[day2] = val1;
+            document.querySelectorAll('.cell-select').forEach(el => el.classList.remove('swap-selected'));
+            selectedCell = null;
+            render();
+            autoSave();
+            pushHistory();
+            showToast(`🔄 Swapped ${staffData[row1].name} ${day1.toUpperCase()} ↔ ${staffData[row2].name} ${day2.toUpperCase()}`);
+        });
+
+        // ─── RANDOMIZE ──────────────────────────────────────────────
+        function randomizeCurrentWeek() {
+            if (!staffData.length) return;
+            staffData.forEach(staff => {
+                staff.schedule = generateRandomSchedule();
+            });
+            render();
+            autoSave();
+            pushHistory();
+            showToast('🎲 Shifts randomized (1 OFF per person)');
+        }
+
+        // ─── GLOBAL DELETE ──────────────────────────────────────────
+        function deleteStaff(idx) {
+            if (idx < 0 || idx >= staffData.length) return;
+            const staffToDelete = staffData[idx];
+            const name = staffToDelete.name;
+            const zone = staffToDelete.zone;
+            if (!confirm(`Delete "${name}" from ALL weeks?`)) return;
+
+            globalStaff = globalStaff.filter(s => !(s.name === name && s.zone === zone));
+            saveGlobalStaff(globalStaff);
+
+            const allKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('omsSchedule_')) allKeys.push(key);
+            }
+            allKeys.forEach(key => {
+                try {
+                    const data = JSON.parse(localStorage.getItem(key));
+                    if (Array.isArray(data)) {
+                        const filtered = data.filter(staff =>
+                            !(staff.name === name && staff.zone === zone)
+                        );
+                        localStorage.setItem(key, JSON.stringify(filtered));
+                    }
+                } catch (_) {}
+            });
+
+            staffData.splice(idx, 1);
+            render();
+            autoSave();
+            pushHistory();
+            showToast(`🗑️ "${name}" removed from all weeks`);
+        }
+
+        // ─── GLOBAL ADD ─────────────────────────────────────────────
+        function addStaff() {
+            const nameInput = document.getElementById('newName');
+            const zoneInput = document.getElementById('newZone');
+            const name = nameInput.value.trim();
+            const zone = zoneInput.value.trim().toUpperCase() || 'A';
+            if (!name) {
+                showToast('Please enter a name');
+                nameInput.focus();
+                return;
+            }
+            if (globalStaff.some(s => s.name === name && s.zone === zone)) {
+                showToast(`"${name}" already exists`);
+                nameInput.focus();
+                return;
+            }
+
+            const newGlobal = { name, zone };
+            globalStaff.push(newGlobal);
+            saveGlobalStaff(globalStaff);
+
+            const newStaff = {
+                name: name,
+                zone: zone,
+                schedule: generateRandomSchedule(),
+                remarks: ''
+            };
+
+            const allKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('omsSchedule_')) allKeys.push(key);
+            }
+            allKeys.forEach(key => {
+                try {
+                    const data = JSON.parse(localStorage.getItem(key));
+                    if (Array.isArray(data)) {
+                        data.push(JSON.parse(JSON.stringify(newStaff)));
+                        localStorage.setItem(key, JSON.stringify(data));
+                    }
+                } catch (_) {}
+            });
+
+            staffData.push(JSON.parse(JSON.stringify(newStaff)));
+            nameInput.value = '';
+            zoneInput.value = '';
+            render();
+            autoSave();
+            pushHistory();
+            showToast(`✅ "${name}" added to all weeks`);
+            nameInput.focus();
+        }
+
+        // ─── SAVE / AUTO ────────────────────────────────────────────
+        function saveToLocal() {
+            try {
+                localStorage.setItem('omsSchedule_' + currentWeekKey, JSON.stringify(staffData));
+                const notes = document.getElementById('weeklyNotes').value;
+                localStorage.setItem('omsNotes_' + currentWeekKey, notes);
+                showToast('✅ Saved');
+            } catch (_) {}
+        }
+
+        function autoSave() {
+            try {
+                localStorage.setItem('omsSchedule_' + currentWeekKey, JSON.stringify(staffData));
+                const notes = document.getElementById('weeklyNotes').value;
+                localStorage.setItem('omsNotes_' + currentWeekKey, notes);
+            } catch (_) {}
+        }
+
+        // ─── RESET ──────────────────────────────────────────────────
+        function resetAll() {
+            if (!confirm('Reset this week (1 OFF per person) and restore global staff list?')) return;
+            globalStaff = DEFAULT_GLOBAL.map(s => ({ name: s.name, zone: s.zone }));
+            saveGlobalStaff(globalStaff);
+            staffData = globalStaff.map(s => ({
+                name: s.name,
+                zone: s.zone,
+                schedule: generateRandomSchedule(),
+                remarks: ''
+            }));
+            render();
+            autoSave();
+            pushHistory();
+            showToast('↺ Reset to default (1 OFF per person)');
+        }
+
+        // ─── COPY WEEK ──────────────────────────────────────────────
+        function copyCurrentWeek() {
+            const picker = document.getElementById('weekPicker');
+            const targetDate = picker.value;
+            if (!targetDate) {
+                showToast('Select a target week first');
+                return;
+            }
+            const sunday = getSunday(targetDate);
+            const targetKey = getWeekKey(sunday);
+            if (targetKey === currentWeekKey) {
+                showToast('Target is the same week');
+                return;
+            }
+            const currentData = staffData.map(staff => JSON.parse(JSON.stringify(staff)));
+            localStorage.setItem('omsSchedule_' + targetKey, JSON.stringify(currentData));
+            const notes = document.getElementById('weeklyNotes').value;
+            localStorage.setItem('omsNotes_' + targetKey, notes);
+            loadWeek(targetDate);
+            showToast('📋 Copied current schedule to selected week');
+        }
+
+        // ─── EXPORT CSV ──────────────────────────────────────────────
+        function exportCSV() {
+            const rows = [];
+            const header = ['Name', 'Zone', ...DAY_LABELS, 'Remarks'];
+            rows.push(header.join(','));
+
+            staffData.forEach(staff => {
+                const row = [
+                    `"${(staff.name || '').replace(/"/g, '""')}"`,
+                    `"${(staff.zone || '').replace(/"/g, '""')}"`,
+                ];
+                DAYS.forEach(day => {
+                    const val = staff.schedule?.[day] || 'OFF';
+                    row.push(`"${val}"`);
+                });
+                row.push(`"${(staff.remarks || '').replace(/"/g, '""')}"`);
+                rows.push(row.join(','));
+            });
+
+            const counts = getCounts();
+            const total = staffData.length;
+            const onDuty = counts.M + counts.N;
+            rows.push('');
+            rows.push(`"Summary","${total} staff","M:${counts.M}","N:${counts.N}","OFF:${counts.OFF}","Annual:${counts.Annual}","Local:${counts.Local}","On duty:${onDuty}"`);
+
+            const csv = rows.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `OMS_Schedule_${currentWeekKey}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            showToast('📤 CSV exported');
+        }
+
+        // ─── TOAST ────────────────────────────────────────────────────
+        let toastTimer = null;
+
+        function showToast(msg) {
+            const el = document.getElementById('toast');
+            if (!el) return;
+            el.textContent = msg;
+            el.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                el.classList.remove('show');
+            }, 2200);
+        }
+
+        // ─── INIT ─────────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            const nameField = document.getElementById('newName');
+            const zoneField = document.getElementById('newZone');
+            if (nameField) {
+                nameField.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') addStaff();
+                });
+            }
+            if (zoneField) {
+                zoneField.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') addStaff();
+                });
+            }
+            document.getElementById('weeklyNotes').addEventListener('blur', function() {
+                autoSave();
+            });
+            const picker = document.getElementById('weekPicker');
+            picker.addEventListener('change', onWeekChange);
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'z') { e.preventDefault();
+                    undo(); }
+                if (e.ctrlKey && e.key === 'y') { e.preventDefault();
+                    redo(); }
+            });
+            init();
+        });
+
+        function init() {
+            globalStaff = getGlobalStaff();
+            const picker = document.getElementById('weekPicker');
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            picker.value = `${year}-${month}-${day}`;
+            loadWeek(picker.value);
+        }
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            // already loaded
+        } else {
+            document.addEventListener('DOMContentLoaded', init);
+        }
+    </script>
+</body>
+</html>
